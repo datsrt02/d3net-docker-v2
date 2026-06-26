@@ -208,6 +208,7 @@ class KnxRuntime:
             addc(sp.get('updown'),'1.007',t,'Setpoint Control UpDown', {'setpoint_control_ga': sp.get('control'), 'min': sp.get('min'), 'max': sp.get('max')})
             addc(mode.get('control'),'20.105',t,'Mode Control'); add(mode.get('status'),'20.105')
             addc(fan.get('control'),'5.001',t,'Fan Control'); add(fan.get('status'),'5.001')
+            addc(fan.get('step'),'1.007',t,'Fan Control Step', {'fan_control_ga': fan.get('control')})
         self.ga_dpt_map.update(dpt_map); self.ga_control_map=control
     def _validate_group_address(self, address: str) -> str:
         m=re.fullmatch(r'(\d{1,2})/(\d{1,2})/(\d{1,3})', (address or '').strip())

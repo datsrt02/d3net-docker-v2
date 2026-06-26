@@ -6,7 +6,7 @@ from pymodbus.framer import FramerType as ModbusFramer
 from .config import AppConfig
 from .modbus_server import VirtualModbusServer
 from .d3net.gateway import D3netGateway, D3netUnit
-from .d3net.encoding import SystemStatus, UnitCapability, UnitStatus, UnitError
+from .d3net.encoding import SystemStatus, UnitCapability, UnitStatus, UnitError, UnitHolding
 from .d3net.const import D3netOperationMode, D3netFanSpeed, D3netFanDirection
 
 _LOGGER = logging.getLogger(__name__)
@@ -17,6 +17,13 @@ def _mode_name(raw: int) -> str:
 def _safe(fn, default=None):
     try: return fn()
     except Exception: return default
+
+def _fan_step_sequence(step_count: int | None) -> list[int]:
+    if step_count == 2: return [0, 1, 5]
+    if step_count == 3: return [0, 1, 3, 5]
+    if step_count == 4: return [0, 1, 2, 4, 5]
+    if step_count == 5: return [0, 1, 2, 3, 4, 5]
+    return [0, 5]
 
 class D3netRuntime:
     def __init__(self) -> None:
@@ -155,6 +162,26 @@ class D3netRuntime:
         await self.set_mode_raw(unit_id, D3netOperationMode[mode.upper()].value)
     async def set_fan_speed_raw(self, unit_id: str, raw_speed: int) -> None:
         u=self.get_unit_by_id(unit_id); await u.async_write_prepare(); u.status.fan_speed=D3netFanSpeed(int(raw_speed)); await u.async_write_commit(); await u.async_update_status(); await self.sync_all_to_virtual_modbus()
+    async def step_fan_speed_raw(self, unit_id: str, increase: bool) -> tuple[int, int]:
+        if not self.gateway: raise RuntimeError('Gateway not connected')
+        u=self.get_unit_by_id(unit_id)
+        holding: UnitHolding = await self.gateway.async_read(UnitHolding, u.index)
+        actual_current = (int(holding.registers[0]) >> 12) & 7
+        step_count = _safe(lambda: u.capabilities.fan_speed_steps.value)
+        sequence = _fan_step_sequence(int(step_count) if step_count is not None else None)
+        current = actual_current if actual_current in sequence else min(sequence, key=lambda v: abs(v - actual_current))
+        if increase:
+            new_raw = next((v for v in sequence if v > current), sequence[-1])
+        else:
+            new_raw = next((v for v in reversed(sequence) if v < current), sequence[0])
+        if new_raw != actual_current:
+            holding.fan_speed = D3netFanSpeed(new_raw)
+            u._holding = holding
+            u.status.fan_speed = D3netFanSpeed(new_raw)
+            await self.gateway.async_write(holding, u.index)
+            await u.async_update_status()
+            await self.sync_all_to_virtual_modbus()
+        return actual_current, new_raw
     async def set_fan_direction(self, unit_id: str, direction: str) -> None:
         u=self.get_unit_by_id(unit_id); await u.async_write_prepare(); u.status.fan_direct=D3netFanDirection[direction]; await u.async_write_commit(); await u.async_update_status(); await self.sync_all_to_virtual_modbus()
 

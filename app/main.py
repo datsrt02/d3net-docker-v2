@@ -205,6 +205,9 @@ async def knx_clear_logs(): knx_runtime.clear_logs(); return {'ok':True}
 def _decode_dta_signed_x10(value:int)->float:
     value=int(value)&0xFFFF; sign=-1 if value&0x8000 else 1; return sign*(value&0x7FFF)/10.0
 
+def _fan_raw_to_knx(value:int)->int|None:
+    return {0:0,1:85,2:85,3:170,4:255,5:255}.get(int(value))
+
 def _find_status(unit_rows, indoor):
     for u in unit_rows:
         if u.get('id')==indoor:
@@ -223,7 +226,7 @@ async def knx_d3net_sync(body: D3netKnxLinkRequest):
 async def _sync_targets_to_knx(targets: list[dict[str, Any]], force: bool = False, refresh_units: bool = True):
     knx_runtime.set_dpt_mapping_from_targets(targets)
     rows=await runtime.units_json_async() if runtime.gateway and refresh_units else runtime.units_json() if runtime.gateway else []
-    mode_map={0:9,1:1,2:3,3:0,7:14}; fan_map={0:0,1:85,2:85,3:170,4:255,5:255}
+    mode_map={0:9,1:1,2:3,3:0,7:14}
     published=[]; skipped=[]
     for t in targets:
         indoor=str(t.get('indoor') or '').strip(); regs=_find_status(rows, indoor)
@@ -238,7 +241,8 @@ async def _sync_targets_to_knx(targets: list[dict[str, Any]], force: bool = Fals
         mr=r32002&0xF
         if mode.get('status') and mr in mode_map: vals.append(('Mode Status', mode['status'], mode_map[mr], '20.105'))
         fr=(r32001>>12)&7
-        if fan.get('status') and fr in fan_map: vals.append(('Fan Status', fan['status'], fan_map[fr], '5.001'))
+        fv=_fan_raw_to_knx(fr)
+        if fan.get('status') and fv is not None: vals.append(('Fan Status', fan['status'], fv, '5.001'))
         for field,ga,val,dpt in vals:
             if knx_runtime.publish_group_value(str(ga),val,dpt,force=force): published.append({'target':t.get('target'),'indoor':indoor,'field':field,'ga':ga,'dpt':dpt,'value':val})
     return {'ok':True,'published_count':len(published),'published':published,'skipped':skipped}
@@ -268,6 +272,13 @@ async def _handle_knx_control_event(event: dict[str,Any]):
             mp={9:0,1:1,3:2,0:3,14:7}; v=int(round(float(val))); await runtime.set_mode_raw(indoor, mp[v])
         elif field=='Fan Control':
             v=int(round(float(val))); raw=0 if v<=42 else 1 if v<=127 else 3 if v<=212 else 5; await runtime.set_fan_speed_raw(indoor, raw)
+        elif field=='Fan Control Step':
+            current_raw, new_raw = await runtime.step_fan_speed_raw(indoor, _as_knx_bool(val))
+            target_ga = (event.get('fan_control_ga') or '').strip()
+            fan_value = _fan_raw_to_knx(new_raw)
+            if target_ga and fan_value is not None:
+                knx_runtime.publish_group_value(target_ga, fan_value, '5.001', force=True)
+            val = f'{current_raw} -> {new_raw}'
         else: return
         knx_runtime.add_log('KNX -> D3net', event.get('source',''), ga, 'GroupValueWrite', dpt, f'{indoor} {field}: {val}')
     except Exception as exc:

@@ -13,7 +13,7 @@ PROJECT_PATH = DATA_DIR / 'project.json'
 
 DEFAULT_ROOM = 'Default / Floor 1 / Room'
 DEFAULT_GA_BASE = '1/1/0'
-GA_STRIDE_PER_INDOOR = 10
+GA_STRIDE_PER_INDOOR = 11
 
 GA_OFFSETS: dict[tuple[str, str], int] = {
     ('switch', 'control'): 0,
@@ -26,6 +26,7 @@ GA_OFFSETS: dict[tuple[str, str], int] = {
     ('mode', 'status'): 7,
     ('fan', 'control'): 8,
     ('fan', 'status'): 9,
+    ('fan', 'step'): 10,
 }
 
 
@@ -53,7 +54,7 @@ def empty_mapping() -> dict[str, dict[str, Any]]:
         },
         'ambient': {'name': 'ACTempAmbient', 'status': ''},
         'mode': {'name': 'ACMode', 'control': '', 'status': ''},
-        'fan': {'name': 'ACFan', 'control': '', 'status': ''},
+        'fan': {'name': 'ACFan', 'control': '', 'status': '', 'step': ''},
     }
 
 
@@ -129,14 +130,32 @@ def _unit_id(unit: dict[str, Any] | str) -> str:
     return str(unit.get('id') or unit.get('indoor') or '').strip()
 
 
-def apply_auto_knx_addresses(target: dict[str, Any], base_address: str, overwrite: bool) -> dict[str, Any]:
+def _configured_group_addresses(targets: list[dict[str, Any]]) -> set[str]:
+    addresses: set[str] = set()
+    for target in targets:
+        for section in normalize_mapping(target.get('mapping') if isinstance(target.get('mapping'), dict) else None).values():
+            for value in section.values():
+                text = str(value or '').strip()
+                if text.count('/') == 2:
+                    addresses.add(text)
+    return addresses
+
+
+def apply_auto_knx_addresses(target: dict[str, Any], base_address: str, overwrite: bool, used_addresses: set[str] | None = None) -> dict[str, Any]:
     target = normalize_target(target)
     indoor_index = unit_id_to_index(target['indoor'])
     base = group_address_to_int(base_address) + indoor_index * GA_STRIDE_PER_INDOOR
     for (section, field), offset in GA_OFFSETS.items():
         current = str(target['mapping'][section].get(field) or '').strip()
         if overwrite or not current:
-            target['mapping'][section][field] = int_to_group_address(base + offset)
+            address_value = base + offset
+            candidate = int_to_group_address(address_value)
+            while used_addresses is not None and candidate in used_addresses:
+                address_value += 1
+                candidate = int_to_group_address(address_value)
+            target['mapping'][section][field] = candidate
+            if used_addresses is not None:
+                used_addresses.add(candidate)
     return target
 
 
@@ -152,6 +171,7 @@ def build_auto_targets(
     room_label = first_room_label(rooms)
     ordered: list[dict[str, Any]] = []
     seen: set[str] = set()
+    used_addresses = set() if overwrite_existing else _configured_group_addresses(existing)
 
     for unit in units:
         indoor = _unit_id(unit)
@@ -164,7 +184,7 @@ def build_auto_targets(
             'indoor': indoor,
             'mapping': empty_mapping(),
         }
-        ordered.append(apply_auto_knx_addresses(target, base_address, overwrite_existing))
+        ordered.append(apply_auto_knx_addresses(target, base_address, overwrite_existing, used_addresses))
         seen.add(indoor)
 
     for target in existing:
@@ -199,6 +219,7 @@ def register_rows_for_targets(targets: list[dict[str, Any]]) -> list[dict[str, A
             _row(t, 'ACMode', 'Mode Control', 'KNX -> DTA116A', mapping['mode'].get('control'), '20.105', '-', f'{holding_base + 1} bits0..3'),
             _row(t, 'ACMode', 'Mode Status', 'DTA116A -> KNX', mapping['mode'].get('status'), '20.105', f'{input_base + 1} bits0..3', '-'),
             _row(t, 'ACFan', 'Fan Control', 'KNX -> DTA116A', mapping['fan'].get('control'), '5.001', '-', f'{holding_base} bits12..14'),
+            _row(t, 'ACFan', 'Fan Control Step', 'KNX -> DTA116A', mapping['fan'].get('step'), '1.007', '-', f'{holding_base} bits12..14 +/-1 step'),
             _row(t, 'ACFan', 'Fan Status', 'DTA116A -> KNX', mapping['fan'].get('status'), '5.001', f'{input_base} bits12..14', '-'),
         ])
     return rows

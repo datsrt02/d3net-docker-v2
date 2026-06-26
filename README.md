@@ -50,6 +50,11 @@ Default login: `admin / admin`
 
 ## v31
 - Added persistent project mapping in `/app/data/project.json` for rooms, indoor targets, and KNX group addresses.
-- Added auto-create KNX group addresses from a base GA, using 10 addresses per DIII indoor unit.
+- Added auto-create KNX group addresses from a base GA, using 11 addresses per DIII indoor unit.
 - Added dynamic DTA116A register map per indoor target.
 - Backend now keeps the D3net -> KNX status bridge running in the background after Modbus scan, without requiring the browser UI to stay open.
+
+## v32
+- Added ACFan -> Fan Control Step KNX address.
+- DPT: 1.007. Value 1 steps fan speed up, value 0 steps fan speed down.
+- Fan stepping reads the current DTA116A holding register value, writes the adjusted fan speed back to the unit holding register, and publishes the resulting value to the configured KNX Fan Control GA (DPT 5.001) for consistency.
