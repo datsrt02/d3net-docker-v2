@@ -1,0 +1,8 @@
+services:
+  daikin-d3net-server:
+    build: .
+    container_name: daikin-d3net-server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/app/data
