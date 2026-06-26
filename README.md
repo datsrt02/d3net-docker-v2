@@ -22,6 +22,10 @@ Open: `http://SERVER_IP:8080`
 
 Default login: `admin / admin`
 
+Release version: `0.1.1`
+
+Versioning rule: subsequent changes should increment the patch version, for example `0.1.2`, `0.1.3`, and so on.
+
 ## v26
 - Fixed login button issue caused by DOM id/function name collision (`login`).
 
@@ -57,4 +61,5 @@ Default login: `admin / admin`
 ## v32
 - Added ACFan -> Fan Control Step KNX address.
 - DPT: 1.007. Value 1 steps fan speed up, value 0 steps fan speed down.
+- Fan stepping follows the fixed sequence Auto -> Low -> Medium -> High.
 - Fan stepping reads the current DTA116A holding register value, writes the adjusted fan speed back to the unit holding register, and publishes the resulting value to the configured KNX Fan Control GA (DPT 5.001) for consistency.

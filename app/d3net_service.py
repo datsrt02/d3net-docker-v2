@@ -18,12 +18,18 @@ def _safe(fn, default=None):
     try: return fn()
     except Exception: return default
 
-def _fan_step_sequence(step_count: int | None) -> list[int]:
-    if step_count == 2: return [0, 1, 5]
-    if step_count == 3: return [0, 1, 3, 5]
-    if step_count == 4: return [0, 1, 2, 4, 5]
-    if step_count == 5: return [0, 1, 2, 3, 4, 5]
-    return [0, 5]
+FAN_STEP_SEQUENCE = [
+    D3netFanSpeed.Auto.value,
+    D3netFanSpeed.Low.value,
+    D3netFanSpeed.Medium.value,
+    D3netFanSpeed.High.value,
+]
+
+def _fan_step_index(raw_speed: int) -> int:
+    if raw_speed <= D3netFanSpeed.Auto.value: return 0
+    if raw_speed == D3netFanSpeed.Low.value: return 1
+    if raw_speed <= D3netFanSpeed.Medium.value: return 2
+    return 3
 
 class D3netRuntime:
     def __init__(self) -> None:
@@ -167,13 +173,9 @@ class D3netRuntime:
         u=self.get_unit_by_id(unit_id)
         holding: UnitHolding = await self.gateway.async_read(UnitHolding, u.index)
         actual_current = (int(holding.registers[0]) >> 12) & 7
-        step_count = _safe(lambda: u.capabilities.fan_speed_steps.value)
-        sequence = _fan_step_sequence(int(step_count) if step_count is not None else None)
-        current = actual_current if actual_current in sequence else min(sequence, key=lambda v: abs(v - actual_current))
-        if increase:
-            new_raw = next((v for v in sequence if v > current), sequence[-1])
-        else:
-            new_raw = next((v for v in reversed(sequence) if v < current), sequence[0])
+        current_index = _fan_step_index(actual_current)
+        new_index = min(current_index + 1, len(FAN_STEP_SEQUENCE) - 1) if increase else max(current_index - 1, 0)
+        new_raw = FAN_STEP_SEQUENCE[new_index]
         if new_raw != actual_current:
             holding.fan_speed = D3netFanSpeed(new_raw)
             u._holding = holding
